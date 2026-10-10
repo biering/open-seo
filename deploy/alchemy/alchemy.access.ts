@@ -64,7 +64,21 @@ export const emailAccessGate = (options: {
   policyName: string;
   applicationName: string;
   domain: string;
+  /**
+   * Further hostnames the same gate must cover — a self-host CUSTOM_DOMAIN on
+   * top of the workers.dev hostname, which stays live either way. Access
+   * enforces per hostname: one missing here reaches the Worker with no
+   * `cf-access-jwt-assertion` header, which the app rejects as unconfigured
+   * (src/middleware/ensure-user/cloudflareAccess.ts).
+   */
+  extraDomains?: string[];
   emails: string[];
+  /**
+   * Access service tokens (their UUIDs, not client ids) admitted without a
+   * login — how an MCP agent gets through with `CF-Access-Client-Id` and
+   * `CF-Access-Client-Secret` headers instead of a browser session.
+   */
+  serviceTokenIds?: string[];
 }) =>
   Effect.gen(function* () {
     const allow = yield* Cloudflare.Access.Policy(options.policyId, {
@@ -72,10 +86,33 @@ export const emailAccessGate = (options: {
       decision: "allow",
       include: options.emails.map((email) => ({ email: { email } })),
     });
+    const policies = [allow.policyId];
+    if (options.serviceTokenIds?.length) {
+      const serviceAuth = yield* Cloudflare.Access.Policy(
+        `${options.policyId}ServiceTokens`,
+        {
+          name: `${options.policyName} service tokens`,
+          decision: "non_identity",
+          include: options.serviceTokenIds.map((tokenId) => ({
+            serviceToken: { tokenId },
+          })),
+        },
+      );
+      policies.push(serviceAuth.policyId);
+    }
     return yield* Cloudflare.Access.Application(options.applicationId, {
       type: "self_hosted",
       name: options.applicationName,
       domain: options.domain,
-      policies: [allow.policyId],
+      // `domain` is Cloudflare's single-hostname shorthand; the multi-hostname
+      // form is `destinations`, which must then list the primary hostname too.
+      ...(options.extraDomains?.length
+        ? {
+            destinations: [options.domain, ...options.extraDomains].map(
+              (uri) => ({ type: "public" as const, uri }),
+            ),
+          }
+        : {}),
+      policies,
     });
   });

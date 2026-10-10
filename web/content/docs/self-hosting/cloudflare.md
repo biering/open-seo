@@ -87,6 +87,18 @@ MCP clients should connect to:
 https://YOUR_WORKER_HOSTNAME/mcp
 ```
 
+## Serving it on your own domain
+
+Set `CUSTOM_DOMAIN` in `.env.selfhost` to a hostname whose zone is already in the same Cloudflare account, then redeploy:
+
+```bash
+CUSTOM_DOMAIN=seo.example.com
+```
+
+The deploy attaches the custom domain to the Worker (creating its DNS record), extends the Access application to cover it, and points `BETTER_AUTH_URL` at it. The workers.dev URL keeps working and stays gated.
+
+Add the hostname here rather than in the Cloudflare dashboard: every deploy reconciles the Worker's custom domains against `CUSTOM_DOMAIN` and detaches the ones it does not know about.
+
 ## Give teammates access to OpenSEO
 
 Add the teammate to `ACCESS_ALLOWED_EMAILS` in `.env.selfhost` and redeploy. Everyone allowed through shares one OpenSEO workspace.

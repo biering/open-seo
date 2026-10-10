@@ -90,9 +90,24 @@ export async function resolveCloudflareAccessContext(
   const userId = typeof payload.sub === "string" ? payload.sub : null;
   const userEmail = typeof payload.email === "string" ? payload.email : null;
 
-  if (!userId || !userEmail) {
-    throw new AppError("UNAUTHENTICATED");
+  if (userId && userEmail) {
+    return resolveSharedWorkspaceContext(userId, userEmail);
   }
 
-  return resolveSharedWorkspaceContext(userId, userEmail);
+  // A service token (a Service Auth policy admitting an agent's
+  // CF-Access-Client-Id/Secret headers) carries no person: `sub` is empty and
+  // the token's client id arrives as `common_name`. The Access policy is the
+  // authorization boundary here too, so it joins the shared workspace under a
+  // synthetic user of its own.
+  const clientId =
+    typeof payload.common_name === "string" ? payload.common_name : null;
+
+  if (!userId && !userEmail && clientId) {
+    return resolveSharedWorkspaceContext(
+      `access-service-token:${clientId}`,
+      `${clientId}@service-token.invalid`,
+    );
+  }
+
+  throw new AppError("UNAUTHENTICATED");
 }

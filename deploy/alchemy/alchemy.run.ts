@@ -176,6 +176,7 @@ const resolveSelfHostAccess = (
   stage: string,
   provision: boolean,
   workersSubdomain: string,
+  customDomain: string,
 ) =>
   Effect.gen(function* () {
     let teamDomain = yield* optionalVar("TEAM_DOMAIN");
@@ -251,7 +252,14 @@ const resolveSelfHostAccess = (
         policyName: `open-seo ${stage} self-host users`,
         applicationName: `open-seo ${stage}`,
         domain: `${workerName(stage)}.${subdomain}`,
+        // The workers.dev hostname stays live when CUSTOM_DOMAIN is set, so
+        // the gate has to cover both — Access enforces per hostname.
+        extraDomains: customDomain ? [customDomain] : [],
         emails: allowedEmails,
+        serviceTokenIds: (yield* optionalVar("ACCESS_SERVICE_TOKEN_IDS"))
+          .split(",")
+          .map((id) => id.trim())
+          .filter(Boolean),
       });
       policyAud = application.aud;
     }
@@ -317,10 +325,24 @@ export default Alchemy.Stack(
     );
     const databaseProvider = yield* optionalVar("DATABASE_PROVIDER");
     const workersSubdomain = yield* readWorkersSubdomain({ required: false });
+    // Self-host custom domain; prod's domains stay hardwired below. Alchemy
+    // owns the Worker's domain list, so this env var is the only place a
+    // hostname survives a deploy — one added in the dashboard is detached on
+    // the next one.
+    const customDomain = yield* optionalVar("CUSTOM_DOMAIN");
+    if (customDomain && !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/i.test(customDomain)) {
+      return yield* Effect.die(
+        new Error(
+          `CUSTOM_DOMAIN must be a bare hostname whose zone lives in this Cloudflare account — "seo.example.com", not "${customDomain}".`,
+        ),
+      );
+    }
 
-    // Auth needs an absolute BETTER_AUTH_URL. Prod sets it explicitly;
-    // previews always derive it from the deterministic worker name — a wrong
-    // WORKERS_SUBDOMAIN surfaces in CI's post-deploy Access verify step.
+    // Auth needs an absolute BETTER_AUTH_URL. Prod sets it explicitly; a
+    // self-host CUSTOM_DOMAIN is the hostname users actually browse, so it
+    // wins over workers.dev; previews derive it from the deterministic worker
+    // name — a wrong WORKERS_SUBDOMAIN surfaces in CI's post-deploy Access
+    // verify step.
     let authUrl: string;
     if (prod) {
       authUrl = yield* optionalVar("BETTER_AUTH_URL");
@@ -340,6 +362,8 @@ export default Alchemy.Stack(
           ),
         );
       }
+    } else if (customDomain) {
+      authUrl = `https://${customDomain}`;
     } else if (workersSubdomain) {
       authUrl = `https://${workerName(stage)}.${workersSubdomain}`;
     } else if (authMode === "hosted") {
@@ -358,6 +382,7 @@ export default Alchemy.Stack(
       stage,
       authMode === "cloudflare_access" && !prod,
       workersSubdomain,
+      customDomain,
     );
 
     // Created once and bound into BOTH workers — they share the same
@@ -426,8 +451,16 @@ export default Alchemy.Stack(
 
     const app = yield* Cloudflare.Worker("open-seo", {
       name: workerName(stage),
-      // Prod serves the real domains; the zone is inferred from the hostname.
-      domain: prod ? ["app.openseo.so", "www.app.openseo.so"] : undefined,
+      // Prod serves the real domains; every other stage opts in with
+      // CUSTOM_DOMAIN. The zone is inferred from the hostname, so it must
+      // exist in this account. Alchemy reconciles this list against the
+      // Worker's live custom domains on every deploy and detaches whatever is
+      // missing from it.
+      domain: prod
+        ? ["app.openseo.so", "www.app.openseo.so"]
+        : customDomain
+          ? [customDomain]
+          : undefined,
       // Prebuilt worker from `vite build` (@cloudflare/vite-plugin). The entry
       // exports the DO + WorkflowEntrypoint classes (re-exported by
       // src/server.ts), which `bundle: false` requires. Sibling chunks under

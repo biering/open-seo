@@ -76,6 +76,18 @@ pnpm install
 pnpm deploy:selfhost --yes
 ```
 
+## Serving it on your own domain
+
+Set `CUSTOM_DOMAIN` in `.env.selfhost` to a hostname whose zone is already in the same Cloudflare account, then redeploy:
+
+```bash
+CUSTOM_DOMAIN=seo.example.com
+```
+
+The deploy attaches the custom domain to the Worker (creating its DNS record), extends the Access application to cover it, and points `BETTER_AUTH_URL` at it. The workers.dev URL keeps working and stays gated.
+
+Add the hostname here rather than in the Cloudflare dashboard: every deploy reconciles the Worker's custom domains against `CUSTOM_DOMAIN` and detaches the ones it does not know about.
+
 ## Giving teammates access
 
 Add the teammate to `ACCESS_ALLOWED_EMAILS` in `.env.selfhost` and redeploy. Dashboard edits to that Access policy are overwritten on the next deploy. (If you manage the Access application yourself, edit its Allow policy in Zero Trust instead.)
@@ -85,6 +97,7 @@ Everyone allowed through Cloudflare Access works in one shared workspace and see
 ## Troubleshooting
 
 - Login fails: re-check `ACCESS_ALLOWED_EMAILS` in `.env.selfhost` and redeploy.
+- The deploy fails to attach `CUSTOM_DOMAIN`: delete any pre-existing DNS record for that hostname — Cloudflare creates its own when the custom domain is attached.
 - `https://<your-worker-hostname>/api/health` reports runtime configuration checks and database status.
 - For server errors, open the Worker `Logs` or run `pnpm exec wrangler tail`. Site audits run in a separate worker: `pnpm exec wrangler tail open-seo-selfhost-audit`.
 
