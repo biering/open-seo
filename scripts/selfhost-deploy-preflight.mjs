@@ -28,12 +28,14 @@ if (major < 22 || (major === 22 && minor < 6)) {
   );
 }
 
-const envFile = ".env.selfhost";
+// scripts/selfhost-deploy.mjs names the instance's env file and merges its
+// values into this process's environment.
+const envFile = process.env.SELFHOST_ENV_FILE || ".env.selfhost";
 if (!existsSync(envFile)) {
   fail(
     `${em(envFile)} not found — create it first:`,
     "",
-    `  ${cmd("cp deploy/.env.selfhost.example .env.selfhost")}`,
+    `  ${cmd(`cp deploy/.env.selfhost.example ${envFile}`)}`,
     "",
     `then set ${em("DATAFORSEO_API_KEY")} and ${em("ACCESS_ALLOWED_EMAILS")}.`,
   );
